@@ -124,9 +124,9 @@ sub vcl_recv {
     if (req.http.Accept-Encoding) {
         if (req.url ~ "\.(jpg|jpeg|png|gif|gz|tgz|bz2|tbz|mp3|ogg|swf|flv|webp|avif|woff2)$") {
             unset req.http.Accept-Encoding;
-        } elsif (req.http.Accept-Encoding ~ "gzip") {
+        } else if (req.http.Accept-Encoding ~ "gzip") {
             set req.http.Accept-Encoding = "gzip";
-        } elsif (req.http.Accept-Encoding ~ "deflate") {
+        } else if (req.http.Accept-Encoding ~ "deflate") {
             set req.http.Accept-Encoding = "deflate";
         } else {
             unset req.http.Accept-Encoding;
@@ -233,18 +233,18 @@ sub vcl_backend_response {
     }
 
     # Paginas de categoria/tag/autor/busca - atualiza a cada 10 minutos
-    elsif (bereq.url ~ "^/category/" || bereq.url ~ "^/tag/" || bereq.url ~ "^/author/" || bereq.url ~ "^/page/") {
+    else if (bereq.url ~ "^/category/" || bereq.url ~ "^/tag/" || bereq.url ~ "^/author/" || bereq.url ~ "^/page/") {
         set beresp.ttl = 600s;
     }
 
     # Arquivos estaticos servidos pelo backend - 1 dia
-    elsif (bereq.url ~ "\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$") {
+    else if (bereq.url ~ "\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$") {
         set beresp.ttl = 86400s;
     }
 
     # Posts individuais (estrutura: /titulo-da-noticia/) - cache de 1 hora
     # Pega tudo que nao e home, categoria, tag, admin, wp-*, feed, etc.
-    elsif (bereq.url ~ "^/[a-z0-9]([a-z0-9\-]*)/?\??" && bereq.url !~ "^/wp-" && bereq.url !~ "^/feed" && bereq.url !~ "^/sitemap") {
+    else if (bereq.url ~ "^/[a-z0-9]([a-z0-9\-]*)/?\??" && bereq.url !~ "^/wp-" && bereq.url !~ "^/feed" && bereq.url !~ "^/sitemap") {
         set beresp.ttl = 3600s;
     }
 
