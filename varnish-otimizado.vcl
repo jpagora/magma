@@ -297,12 +297,18 @@ sub vcl_deliver {
 # vcl_hit
 # =============================================================================
 sub vcl_hit {
+    # TTL valido - entregar normalmente
     if (obj.ttl >= 0s) {
         return (deliver);
     }
-    # Objeto expirado mas dentro do grace period - servir stale
+    # TTL expirado: verificar se backend esta vivo
     if (obj.ttl + obj.grace > 0s) {
-        set req.http.grace = "stale (within grace)";
+        if (std.healthy(req.backend_hint)) {
+            # Backend saudavel - buscar conteudo novo (purge funciona instantaneo)
+            return (miss);
+        }
+        # Backend doente - servir stale para nao derrubar o site
+        set req.http.grace = "stale (backend sick)";
         return (deliver);
     }
     return (miss);
