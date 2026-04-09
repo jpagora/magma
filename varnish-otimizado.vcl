@@ -13,6 +13,15 @@ backend default {
     .first_byte_timeout = 300s;
     .connect_timeout = 5s;
     .between_bytes_timeout = 5s;
+
+    # Health check - Varnish verifica se o backend esta vivo
+    .probe = {
+        .url = "/wp-login.php";
+        .timeout = 5s;
+        .interval = 15s;
+        .window = 5;
+        .threshold = 3;
+    }
 }
 
 acl purger {
@@ -168,6 +177,14 @@ sub vcl_hash {
     }
 
     return (lookup);
+}
+
+# =============================================================================
+# vcl_backend_fetch - Requisicao para o backend
+# =============================================================================
+sub vcl_backend_fetch {
+    # Informar ao WordPress/plugin que Varnish suporta Cache Tags
+    set bereq.http.Surrogate-Capability = "vhp=Surrogate/1.0 tags/1";
 }
 
 # =============================================================================
