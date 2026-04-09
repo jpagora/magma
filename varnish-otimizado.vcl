@@ -180,15 +180,6 @@ sub vcl_hash {
 }
 
 # =============================================================================
-# vcl_backend_fetch - Requisicao para o backend
-# =============================================================================
-sub vcl_backend_fetch {
-    # Informar ao WordPress/plugin que Varnish suporta Cache Tags
-    # Formato: vhp="Surrogate/1.0 tags/1"
-    set bereq.http.Surrogate-Capability = {"vhp="Surrogate/1.0 tags/1""};
-}
-
-# =============================================================================
 # vcl_backend_response - Resposta do backend
 # =============================================================================
 sub vcl_backend_response {
