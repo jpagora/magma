@@ -284,6 +284,16 @@ sub vcl_deliver {
     }
     set resp.http.X-Cache-Hits = obj.hits;
 
+    # --- CACHE-CONTROL PARA O BROWSER ---
+    # WordPress envia no-store por padrao. Substituimos por cache curto
+    # para que o browser nao bata no Varnish a cada clique,
+    # mas purges ainda funcionem rapido (max 2 min de atraso).
+    if (resp.http.Cache-Control !~ "private") {
+        unset resp.http.Pragma;
+        unset resp.http.Expires;
+        set resp.http.Cache-Control = "public, max-age=120, stale-while-revalidate=60";
+    }
+
     # --- REMOVER HEADERS SENSIVEIS ---
     unset resp.http.X-Powered-By;
     unset resp.http.Server;
