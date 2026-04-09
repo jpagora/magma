@@ -95,6 +95,14 @@ sub vcl_recv {
 
     set req.http.grace = "none";
 
+    # --- NORMALIZACAO DE USER-AGENT (Device Detection) ---
+    # Newspaper Theme gera HTML diferente para mobile/desktop
+    if (req.http.User-Agent ~ "(?i)(android|bb\d+|meego).+mobile|avantgo|bada/|blackberry|blazer|compal|elaine|fennec|hiptop|iemobile|ip(hone|od)|iris|kindle|lge |maemo|midp|mmp|mobile.+firefox|netfront|opera m(ob|in)i|palm( os)?|phone|p(ixi|rim)|plucker|pocket|psp|series(4|6)0|symbian|treo|up.(browser|link)|vodafone|wap|windows ce|xda|xiino") {
+        set req.http.X-UA-Device = "mobile";
+    } else {
+        set req.http.X-UA-Device = "desktop";
+    }
+
     # --- BYPASS OBRIGATORIO (nunca cachear) ---
     if (req.url ~ "^/wp-admin" ||
         req.url ~ "^/wp-login\.php" ||
@@ -163,11 +171,10 @@ sub vcl_hash {
         hash_data(server.ip);
     }
 
-    # Nao separar cache por device - WP Rocket/Newspaper ja servem responsivo
-    # Se o tema realmente gera HTML diferente por device, descomente abaixo:
-    # if (req.http.X-UA-Device) {
-    #     hash_data(req.http.X-UA-Device);
-    # }
+    # Cache separado por device - Newspaper Theme gera HTML diferente
+    if (req.http.X-UA-Device) {
+        hash_data(req.http.X-UA-Device);
+    }
 
     return (lookup);
 }
