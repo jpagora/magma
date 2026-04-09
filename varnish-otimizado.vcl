@@ -13,15 +13,6 @@ backend default {
     .first_byte_timeout = 300s;
     .connect_timeout = 5s;
     .between_bytes_timeout = 5s;
-
-    # Health check - Varnish verifica se o backend esta vivo
-    .probe = {
-        .url = "/wp-login.php";
-        .timeout = 5s;
-        .interval = 15s;
-        .window = 5;
-        .threshold = 3;
-    }
 }
 
 acl purger {
