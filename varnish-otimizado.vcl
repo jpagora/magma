@@ -312,13 +312,13 @@ sub vcl_hit {
     if (obj.ttl + obj.grace > 0s) {
         if (std.healthy(req.backend_hint)) {
             # Backend saudavel - buscar conteudo novo (purge funciona instantaneo)
-            return (miss);
+            return (fetch);
         }
         # Backend doente - servir stale para nao derrubar o site
         set req.http.grace = "stale (backend sick)";
         return (deliver);
     }
-    return (miss);
+    return (fetch);
 }
 
 # =============================================================================
