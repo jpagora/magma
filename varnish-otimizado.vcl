@@ -241,20 +241,20 @@ sub vcl_backend_response {
         set beresp.ttl = 300s;
     }
 
-    # Paginas de categoria/tag - atualiza a cada 10 minutos
-    if (bereq.url ~ "^/category/" || bereq.url ~ "^/tag/") {
+    # Paginas de categoria/tag/autor/busca - atualiza a cada 10 minutos
+    elsif (bereq.url ~ "^/category/" || bereq.url ~ "^/tag/" || bereq.url ~ "^/author/" || bereq.url ~ "^/page/") {
         set beresp.ttl = 600s;
     }
 
-    # Posts individuais - cache mais longo (1 hora)
-    # Ajuste o pattern conforme sua estrutura de URL
-    if (bereq.url ~ "^/20[0-9]{2}/" || bereq.url ~ "\.html$") {
-        set beresp.ttl = 3600s;
+    # Arquivos estaticos servidos pelo backend - 1 dia
+    elsif (bereq.url ~ "\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$") {
+        set beresp.ttl = 86400s;
     }
 
-    # Arquivos estaticos servidos pelo backend - 1 dia
-    if (bereq.url ~ "\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$") {
-        set beresp.ttl = 86400s;
+    # Posts individuais (estrutura: /titulo-da-noticia/) - cache de 1 hora
+    # Pega tudo que nao e home, categoria, tag, admin, wp-*, feed, etc.
+    elsif (bereq.url ~ "^/[a-z0-9]([a-z0-9\-]*)/?\??" && bereq.url !~ "^/wp-" && bereq.url !~ "^/feed" && bereq.url !~ "^/sitemap") {
+        set beresp.ttl = 3600s;
     }
 
     return (deliver);
