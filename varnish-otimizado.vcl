@@ -64,8 +64,9 @@ sub vcl_recv {
             return (synth(200, "Banned by tags"));
         }
 
-        # Limpeza exata por URL
-        return (purge);
+        # Limpeza exata por URL (ban limpa todas as variantes: mobile + desktop)
+        ban("req.http.host == " + req.http.host + " && req.url == " + req.url);
+        return (synth(200, "Purged"));
     }
 
     # --- BAN para limpeza em massa (WP Rocket / plugins) ---
