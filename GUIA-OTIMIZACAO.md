@@ -64,8 +64,9 @@
 | Bypass /feed | Ausente | Adicionado | Feeds RSS devem ser sempre frescos |
 | Bypass /wp-json | Ausente | Adicionado | API REST nao deve ser cacheada |
 | Bypass WooCommerce cookies | Ausente | Adicionado (preventivo) | Se um dia usar WooCommerce, ja esta protegido |
-| `vcl_deliver` Cache-Control | Sobrescrevia com no-store | Removido | **BUG CRITICO**: voce estava mandando `no-store` pro browser em TODAS as respostas publicas! Isso anulava o cache do navegador |
-| Device hash | Mobile/Desktop separado | Removido | HTML responsivo = mesmo conteudo. Dobrava o cache sem necessidade |
+| `vcl_deliver` Cache-Control | Sobrescrevia com no-store | `public, max-age=120` | **BUG CRITICO**: voce estava mandando `no-store` pro browser em TODAS as respostas publicas! Isso anulava o cache do navegador |
+| Device hash | Mobile/Desktop separado | **Mantido** (mobile/desktop) | Reintroduzido: o Newspaper Theme entrega HTML diferente por device. O PURGE usa `ban()` justamente para limpar as duas variantes de uma vez |
+| Bypass de sitemaps | Ausente | Adicionado | **BUG CRITICO (Google News)** - ver secao 7 |
 
 **BUG CRITICO ENCONTRADO:** No seu `vcl_deliver` original, havia este bloco:
 ```
@@ -130,6 +131,45 @@ Plugin recomendado: **Redis Object Cache** (Till Kruss) ou **Object Cache Pro** 
 - **CDN**: Considere Cloudflare ou BunnyCDN para estaticos
 - **Heartbeat**: Reduzir para 120s no admin, desabilitar no frontend
 - **Varnish**: Ativar integracao com Varnish no WP Rocket (Settings > CDN > Varnish)
+
+---
+
+### 7. GOOGLE NEWS - Bug do sitemap cacheado (CRITICO)
+
+**Sintoma:** materias do jpagora.com demoram a aparecer (ou nao aparecem) no
+Google News, enquanto concorrentes menores aparecem.
+
+**Causa encontrada:** o news sitemap estava sendo cacheado por 1 hora no
+Varnish e, na pratica, nunca era limpo. A cadeia era esta:
+
+1. O nginx casa `/news.xml` no bloco de SEOPress e reescreve para
+   `/index.php?seopress_news=1` com `last` (nginx-vhost-otimizado.conf).
+2. O `last` refaz o match de location, cai em `location /` e proxia pro Varnish.
+3. **O Varnish recebe `/index.php?seopress_news=1`, nao `/news.xml`.**
+4. No `vcl_backend_response`, o guard `bereq.url !~ "^/sitemap"` nao dispara
+   (a URL nao comeca com `/sitemap`), entao a URL cai na regra generica de
+   post individual e recebe **TTL de 3600s + grace de 6h**.
+5. O PURGE do plugin mira `/news.xml` - uma chave que nunca existiu no cache.
+   Resultado: o sitemap ficava servido de cache velho.
+
+Para o Google News isso e grave: o news sitemap e o canal de descoberta de
+materia nova (janela de 48h). Publicar um furo e servir ao Googlebot um
+sitemap de 1 hora atras significa perder a janela em que a noticia vale.
+
+**Correcao:** bypass explicito de sitemap no `vcl_recv`, casando a **query
+string** (`seopress_sitemap|news|cpt|author|video`), que e o que o Varnish
+realmente ve, e nao a URL bonita. O guard antigo por `^/sitemap` foi mantido
+como redundancia.
+
+**Valide antes de reiniciar** (nao consegui validar no ambiente onde editei):
+
+```bash
+varnishd -C -f /etc/varnish/default.vcl >/dev/null && echo "VCL OK"
+systemctl reload varnish   # ou restart
+
+# O sitemap deve vir MISS/uncacheable, nunca HIT:
+curl -sI https://jpagora.com/news.xml | grep -i -E "x-cache|age"
+```
 
 ---
 

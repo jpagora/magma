@@ -105,7 +105,20 @@ sub vcl_recv {
     }
 
     # --- BYPASS OBRIGATORIO (nunca cachear) ---
-    if (req.url ~ "^/wp-admin" ||
+    #
+    # SITEMAPS: precisam estar SEMPRE frescos. O Google News descobre materia
+    # nova pelo news sitemap (janela de 48h) - servir uma copia de 1h atrasada
+    # atrasa a indexacao de furo/breaking news.
+    #
+    # ATENCAO: o nginx reescreve /sitemaps.xml e /news.xml para
+    # /index.php?seopress_* ANTES de proxiar para o Varnish (rewrite ... last).
+    # Ou seja, a URL "bonita" NUNCA chega aqui - e a query string que precisa
+    # ser casada. Por isso a regra "seopress_" vem primeiro; as regras de
+    # /sitemap*.xml sao defesa em profundidade caso o rewrite mude.
+    if (req.url ~ "seopress_(sitemap|news|cpt|author|video)" ||
+        req.url ~ "^/[^?]*sitemap[^?]*\.x(m|s)l" ||
+        req.url ~ "^/news\.xml" ||
+        req.url ~ "^/wp-admin" ||
         req.url ~ "^/wp-login\.php" ||
         req.url ~ "^/wp-cron\.php" ||
         req.url ~ "^/wp-json/" ||
@@ -262,7 +275,17 @@ sub vcl_backend_response {
 
     # Posts individuais (estrutura: /titulo-da-noticia/) - cache de 1 hora
     # Pega tudo que nao e home, categoria, tag, admin, wp-*, feed, etc.
-    else if (bereq.url ~ "^/[a-z0-9]([a-z0-9\-]*)/?\??" && bereq.url !~ "^/wp-" && bereq.url !~ "^/feed" && bereq.url !~ "^/sitemap") {
+    #
+    # NOTA: o guard "^/sitemap" sozinho nunca disparava, porque o nginx ja
+    # reescreveu a URL para /index.php?seopress_* antes de chegar no Varnish
+    # (a URL casava com o padrao generico abaixo e pegava TTL de 1h).
+    # Os sitemaps agora sao bypassados no vcl_recv; o guard por query string
+    # fica aqui como redundancia.
+    else if (bereq.url ~ "^/[a-z0-9]([a-z0-9\-]*)/?\??" &&
+             bereq.url !~ "^/wp-" &&
+             bereq.url !~ "^/feed" &&
+             bereq.url !~ "^/sitemap" &&
+             bereq.url !~ "seopress_(sitemap|news|cpt|author|video)") {
         set beresp.ttl = 3600s;
     }
 
