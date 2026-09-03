@@ -22,42 +22,9 @@ Três coisas que precisam estar claras antes de qualquer decisão técnica:
 
 ---
 
-## Parte 1 — Tailscale com exit node compartilhado
+## Parte 1 — Riscos de vários clientes na mesma VPS
 
-### A proposta original
-
-Usar Tailscale na VPS com exit node no Brasil, para que as sessões saiam por um IP
-brasileiro em vez do IP do datacenter onde a VPS está hospedada.
-
-### Por que não resolve
-
-**Exit node é por máquina, não por sessão.** A VPS inteira passa a sair por um único IP.
-Num SaaS multi-tenant isso é o oposto do que você precisa — reforça exatamente o problema
-de correlação descrito na Parte 2.
-
-**Geolocalização é sinal fraco.** Pesa muito menos que comportamento. Usuários viajam,
-usam roaming, VPN corporativa. Um número `+55` conectando de fora não é anomalia forte.
-
-**O que pesa é o ASN, não o país.** Um IP de datacenter (Hetzner, Contabo, OVH,
-DigitalOcean, AWS) é substancialmente mais suspeito que um residencial ou móvel. Exit node
-num VPS brasileiro te dá o país mas continua sendo datacenter — você troca
-"datacenter alemão" por "datacenter brasileiro". Ganho marginal.
-
-**Cria um ponto único de falha perigoso.** Se o exit node cair, todas as sessões reconectam
-simultaneamente pelo IP real da VPS. "N contas mudaram de IP ao mesmo tempo" é um evento
-mais anômalo do que nunca ter usado VPN — você piora justamente o cenário que queria
-proteger.
-
-### Veredito
-
-Não use exit node compartilhado. Se for controlar egress, faça **por sessão dentro do
-Baileys**, não por rota de sistema. Ver Parte 5 para a versão do Tailscale que funciona.
-
----
-
-## Parte 2 — Riscos de vários clientes na mesma VPS
-
-Este é o risco real, e é maior que a questão de geolocalização.
+Este é o risco dominante, e é maior que qualquer questão de geolocalização.
 
 ### Correlação de contas (principal)
 
@@ -82,9 +49,36 @@ pode ficar acessível a outro. Isso é incidente de segurança, não apenas risc
 
 ---
 
+## Parte 2 — VPN com saída compartilhada não resolve
+
+Vale registrar por que a ideia mais intuitiva — colocar a VPS atrás de uma VPN com saída
+no Brasil — foi descartada. Vale para qualquer solução desse tipo, gerenciada ou não.
+
+**A saída passa a ser única para a máquina inteira.** Num SaaS multi-tenant isso é o oposto
+do que você precisa: reforça exatamente o problema de correlação da Parte 1, em vez de
+resolvê-lo.
+
+**Geolocalização é sinal fraco.** Pesa muito menos que comportamento. Usuários viajam, usam
+roaming, VPN corporativa. Um número `+55` conectando de fora não é anomalia forte.
+
+**O que pesa é o ASN, não o país.** Um IP de datacenter (Hetzner, Contabo, OVH,
+DigitalOcean, AWS) é substancialmente mais suspeito que um residencial ou móvel. Saída num
+VPS brasileiro te dá o país mas continua sendo datacenter — você troca "datacenter alemão"
+por "datacenter brasileiro". Ganho marginal.
+
+**Cria um ponto único de falha perigoso.** Se o gateway cair, todas as sessões reconectam
+simultaneamente pelo IP real da VPS. "N contas mudaram de IP ao mesmo tempo" é um evento
+mais anômalo do que nunca ter usado VPN — você piora justamente o cenário que queria
+proteger.
+
+**Conclusão:** controle de egress tem que ser **por sessão**, dentro do Baileys, e nunca por
+rota global de sistema. É o que as Partes 4 e 5 fazem.
+
+---
+
 ## Parte 3 — Por que não dá para usar o IP do próprio usuário
 
-### A pergunta
+### A ideia
 
 A ferramenta captura o IP, ASN e localização do cliente e "coloca no Baileys" para que a
 sessão apareça como vinda da conexão dele.
@@ -117,10 +111,10 @@ Fim da lista. Não existe campo `location`, não existe campo `asn`.
 
 ---
 
-## Parte 4 — Uso legítimo do IP/ASN capturado
+## Parte 4 — Pool de proxies por tenant (base da arquitetura)
 
-O dado é útil, só não como origem. Use como **critério de roteamento**: capture no signup,
-resolva geo + ASN, e escolha do pool o proxy mais próximo.
+O IP/ASN capturado do cliente é útil — só não como origem. Use como **critério de
+roteamento**: capture no signup, resolva geo + ASN, e escolha do pool o proxy mais próximo.
 
 ```js
 // no signup, a partir do request do dashboard
@@ -132,7 +126,7 @@ await db.tenants.update(id, { proxyId: proxy.id })   // sticky, nunca rotacione
 ```
 
 Com proxy residencial que ofereça targeting por ASN, dá para casar a operadora do cliente
-(Vivo, Claro, Algar). É o mais próximo de "simular o usuário" que existe de forma
+(Vivo, Claro, Algar). É o mais próximo de "parecer com o usuário" que existe de forma
 legítima — e continua sendo *seu* IP, apenas escolhido para ser coerente.
 
 ### Configuração no Baileys
@@ -162,54 +156,85 @@ const sock = makeWASocket({
 - **Teto de sessões por IP** (~10 a 20) e não misture tenants de perfis de risco muito
   diferentes no mesmo IP.
 
+Esta é a camada padrão: resolve correlação sem exigir nada do cliente. As opções da Parte 5
+são para os tenants de maior valor ou maior risco.
+
 ---
 
-## Parte 5 — As arquiteturas que entregam IP real
+## Parte 5 — Arquiteturas que entregam o IP real do cliente
 
 Se o objetivo é a sessão sair pelo IP real do cliente, pare de simular e use o IP real.
-Duas formas:
+Duas formas, nenhuma delas dependendo de VPN gerenciada de terceiro.
 
 ### Opção A — Agente local no cliente
 
 Um binário ou container leve que o cliente roda na máquina dele. Ele segura a sessão
 Baileys e conecta na WhatsApp pela conexão dele; seu backend fala com o agente por
-WebSocket persistente.
+WebSocket persistente (o agente disca para você, então funciona atrás de NAT sem
+configuração).
 
 IP, ASN e fingerprint residencial autênticos — porque são reais.
 
 **Custo:** fricção de instalação, máquina precisa ficar ligada, suporte e auto-update.
 
-### Opção B — Tailscale invertido (exit node no cliente)
+### Opção B — WireGuard próprio, saída na rede do cliente
 
-Aqui o Tailscale finalmente serve. Não a VPS saindo por um exit node BR compartilhado, e
-sim **cada tenant com o próprio exit node na rede dele**.
+Mesma ideia, sem exigir que o cliente rode a stack do Baileys. Um container por tenant na
+sua VPS, cada um com sua interface WireGuard, e o egress daquele container saindo pela
+conexão do cliente.
 
-Um container por tenant, `tailscaled` em modo userspace expondo SOCKS5, e o Baileys usando
-esse SOCKS5:
+**Na sua VPS**, dentro do container do tenant:
+
+```ini
+[Interface]
+PrivateKey = <chave-do-container>
+Address    = 10.90.0.2/32
+
+[Peer]
+PublicKey  = <chave-publica-do-cliente>
+AllowedIPs = 0.0.0.0/0        # todo o egress do container vai pelo túnel
+```
+
+**Na caixa do cliente** (mini-PC, Raspberry Pi, roteador com OpenWRT):
+
+```ini
+[Interface]
+PrivateKey = <chave-do-cliente>
+Address    = 10.90.0.1/24
+ListenPort = 51820
+
+[Peer]
+PublicKey           = <chave-publica-do-container>
+AllowedIPs          = 10.90.0.2/32
+Endpoint            = vps.seudominio.com:51820
+PersistentKeepalive = 25
+```
+
+E, na caixa do cliente, encaminhamento com NAT:
 
 ```bash
-tailscaled --tun=userspace-networking --socks5-server=localhost:1055
-tailscale up --exit-node=<nó-do-cliente>
+sysctl -w net.ipv4.ip_forward=1
+iptables -t nat -A POSTROUTING -o <interface-wan> -j MASQUERADE
 ```
 
-```js
-const agent = new SocksProxyAgent('socks5://localhost:1055')
+> Ajuste `<interface-wan>` e as faixas de IP à realidade da rede. Estes trechos são
+> ilustrativos e não foram executados — valide num tenant piloto antes de escalar.
 
-makeWASocket({
-  auth: state,
-  agent,
-  fetchAgent: agent,
-  browser: tenant.browser,
-})
-```
+**Detalhes que importam:**
 
-Sem mexer em rota do host, sem network namespaces, isolamento natural por container.
+- **Quem disca é o cliente.** Residencial fica atrás de NAT, então a caixa do cliente
+  inicia a conexão e mantém `PersistentKeepalive = 25`. Se o IP dele mudar (IP dinâmico),
+  o túnel se restabelece sozinho.
+- **Sem rota global.** Como cada container tem seu próprio namespace de rede, o
+  `AllowedIPs = 0.0.0.0/0` afeta apenas aquele tenant. O host não é tocado.
+- **Gestão de chaves é sua.** Sem serviço de coordenação, você gera e distribui o par de
+  chaves por tenant. Vale entregar um script ou imagem pronta para o cliente — instalação
+  manual de WireGuard vira ticket de suporte.
+- **Monitore o túnel.** Se cair, a sessão daquele tenant deve **pausar**, não cair para o
+  IP da VPS. Sem isso você recria o problema da Parte 2 em escala menor.
 
-> Confirme os flags contra a versão do Tailscale que for usar — o modo userspace mudou de
-> nome entre releases.
-
-**Custo:** o cliente instala Tailscale numa máquina ou roteador e mantém ligado. Bem menos
-fricção que o agente completo, e você mantém a orquestração.
+**Custo:** o cliente mantém uma caixa ligada; você assume gestão de chaves e monitoramento
+de túnel. Menos fricção que a Opção A, e você mantém toda a orquestração.
 
 ### O ganho real destas duas opções
 
@@ -299,15 +324,23 @@ Bans vão acontecer. Trate isso como requisito de produto, não como exceção:
 
 | Ação | Impacto | Esforço |
 |---|---|---|
-| Tailscale exit node compartilhado | Marginal, adiciona SPOF | Baixo — **não recomendado** |
+| VPN com saída compartilhada para a VPS | Marginal, adiciona SPOF | Baixo — **não recomendado** |
 | 1 IP/proxy por tenant (sticky, ASN-aware) | **Alto** | Médio |
 | Jitter na reconexão | Alto | Baixo |
 | Rate limit + warm-up por número | **Alto** | Médio |
 | Kill switch por tenant | Alto | Médio |
 | Isolamento por processo/container | Médio-alto | Médio |
+| WireGuard com saída no cliente (Opção B) | Muito alto | Médio-alto |
 | Agente local no cliente (Opção A) | Muito alto | Alto |
-| Tailscale invertido (Opção B) | Muito alto | Médio-alto |
 | Cloud API oficial (tier premium) | Elimina o problema | Alto |
+
+### Ordem sugerida de implementação
+
+1. Isolamento por container + jitter na reconexão — barato, resolve o pior dos sintomas.
+2. Pool de proxies sticky por tenant — resolve correlação para toda a base.
+3. Rate limit, warm-up e kill switch — é aqui que os bans realmente param.
+4. WireGuard com saída no cliente para os tenants de maior valor ou maior risco.
+5. Cloud API oficial como tier premium.
 
 **Regra de bolso:** rede resolve correlação; comportamento resolve denúncia. Você precisa
 das duas camadas — nenhuma substitui a outra.
